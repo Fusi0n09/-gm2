@@ -441,10 +441,10 @@ Script.Functions.ToolActivated=function()
         if TargetCF then
             pcall(function()
                 if gm_cfg.Silent.Custom_AntiAimViewerPoint.Enabled==false then
-                    if game.PlaceId==13873488228 or game.PlaceId==13872892064 or game.PlaceId==13397024889 then local Args={[1]="MOUSE",[2]=TargetCF} game:GetService("ReplicatedStorage").MAINEVENT:FireServer(unpack(Args))
-                    elseif game.PlaceId==9825515356 then local Args={[1]="MousePosUpdate",[2]=TargetCF+Vector3.new(25,100,25)} game:GetService("ReplicatedStorage").MainEvent:FireServer(unpack(Args))
+                    if game.PlaceId==13873488228 or game.PlaceId==13872892064 or game.PlaceId==13397024889 then local Args={[1]="MOUSE",[2]=TargetCF} pcall(function() local e = game:GetService("ReplicatedStorage"):FindFirstChild("MAINEVENT") if e then e:FireServer(unpack(Args)) end end)
+                    elseif game.PlaceId==9825515356 then local Args={[1]="MousePosUpdate",[2]=TargetCF+Vector3.new(25,100,25)} pcall(function() local e = game:GetService("ReplicatedStorage"):FindFirstChild("MainEvent") if e then e:FireServer(unpack(Args)) end end)
                     elseif game.PlaceId==9183932460 or game.PlaceId==18461632007 then local Args={[1]="UpdateMousePos",[2]=TargetCF} game:GetService("ReplicatedStorage"):FindFirstChild(".gg/untitledhood"):FireServer(unpack(Args))
-                    else local Args={[1]="UpdateMousePos",[2]=TargetCF} game:GetService("ReplicatedStorage").MainEvent:FireServer(unpack(Args)) end
+                    else local Args={[1]="UpdateMousePos",[2]=TargetCF} pcall(function() local e = game:GetService("ReplicatedStorage"):FindFirstChild("MainEvent") if e then e:FireServer(unpack(Args)) end end) end
                 end
             end)
         end
@@ -532,6 +532,246 @@ Players.PlayerRemoving:Connect(function(Plr) if Script.EspPlayers[Plr] then for 
 
 if gm_cfg.Options.GetInformation and GetTime then Script.Functions.CreateNotification("/gm Loaded In: "..string.format("%.4f",os.clock()-GetTime).." Seconds",Color3.fromRGB(206,67,67)) end
 
+
+
+-- ============================================================
+-- SKIN CHANGER (save after death version)
+-- ============================================================
+local gm_players = game:GetService("Players")
+local gm_replicatedstorage = game:GetService("ReplicatedStorage")
+local gm_localplayer = gm_players.LocalPlayer
+
+getgenv().gm_skins = {
+    enabled = true,
+    ["DoubleBarrel"] = "Ascension",
+    ["Revolver"] = "Ascension",
+    ["TacticalShotgun"] = "Ascension",
+    ["SMG"] = "Ascension",
+    ["Shotgun"] = "Ascension",
+    special = {
+        ["Knife"] = "Beta"
+    }
+}
+
+local gm_handlemap = {
+    DB_HANDLE = "DoubleBarrel",
+    REV_HANDLE = "Revolver"
+}
+
+local function gm_isbasepart(x)
+    return typeof(x) == "Instance" and x:IsA("BasePart")
+end
+
+local function gm_ensureprimarypart(model)
+    if model and model:IsA("Model") then
+        if not gm_isbasepart(model.PrimaryPart) then
+            local first = model:FindFirstChildWhichIsA("BasePart")
+            if first then model.PrimaryPart = first end
+        end
+        return model.PrimaryPart
+    end
+end
+
+local function gm_prepparts(model, isknife)
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+            part.Anchored = false
+            part.Massless = true
+            part.Transparency = math.clamp(part.Transparency, 0, 1)
+        end
+        if isknife and part:IsA("MeshPart") then
+            local sa = part:FindFirstChildOfClass("SurfaceAppearance")
+            if sa then sa:Destroy() end
+            if part.TextureID == "" then
+                local name = part.Name:lower()
+                if name:find("box") or name:find("cube") or name:find("part") or name:find("hit") then
+                    part.Transparency = 1
+                end
+            end
+        end
+    end
+end
+
+local function gm_weldparts(a, b)
+    if gm_isbasepart(a) and gm_isbasepart(b) then
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = a
+        weld.Part1 = b
+        weld.Parent = a
+        return weld
+    end
+end
+
+local function gm_getwrapskinmodel(weaponname, skinname, timeout)
+    timeout = timeout or 5
+    local wraps = gm_replicatedstorage:WaitForChild("Wraps", timeout)
+    if not wraps then return nil end
+    local folder = wraps:WaitForChild("[" .. weaponname .. "]", timeout)
+    if not folder then return nil end
+    if not skinname or skinname == "" then return nil end
+    return folder:WaitForChild(skinname, timeout)
+end
+
+local function gm_applymodelonholder(holder, skinmodel)
+    if not holder or not skinmodel then return end
+    local handle = holder:FindFirstChild("Handle")
+    if not gm_isbasepart(handle) then return end
+    local old = holder:FindFirstChild("SkinModel")
+    if old then old:Destroy() end
+    local clone = skinmodel:Clone()
+    clone.Name = "SkinModel"
+    local primarypart = gm_ensureprimarypart(clone)
+    if not gm_isbasepart(primarypart) then return end
+    local isknife = holder.Name:find("Knife") and true or false
+    gm_prepparts(clone, isknife)
+    clone.Parent = holder
+    clone:PivotTo(handle.CFrame)
+    for _, part in ipairs(clone:GetDescendants()) do
+        if part:IsA("BasePart") then gm_weldparts(handle, part) end
+    end
+    handle.Transparency = 1
+end
+
+local function gm_applytoolskin(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    local weaponname = tool.Name:match("^%[(.+)%]$")
+    if not weaponname then return end
+    local skinname = getgenv().gm_skins[weaponname]
+    if not skinname or skinname == "" then return end
+    local skinmodel = gm_getwrapskinmodel(weaponname, skinname, 5)
+    if skinmodel then gm_applymodelonholder(tool, skinmodel) end
+end
+
+local function gm_applyknifeskin(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    if tool.Name ~= "[Knife]" then return end
+    local knifeskin = getgenv().gm_skins.special and getgenv().gm_skins.special["Knife"]
+    if not knifeskin or knifeskin == "" then return end
+    local knives = gm_replicatedstorage:FindFirstChild("Knives")
+    if not knives then return end
+    local skinmodel = knives:FindFirstChild(knifeskin)
+    if skinmodel then gm_applymodelonholder(tool, skinmodel) end
+end
+
+local function gm_applyhandleskin(character, handlefoldername)
+    local weaponname = gm_handlemap[handlefoldername]
+    if not weaponname then return end
+    local skinname = getgenv().gm_skins[weaponname]
+    if not skinname or skinname == "" then return end
+    local handlefolder = character:FindFirstChild(handlefoldername)
+    if not handlefolder then return end
+    local skinmodel = gm_getwrapskinmodel(weaponname, skinname, 5)
+    if skinmodel then gm_applymodelonholder(handlefolder, skinmodel) end
+end
+
+local function gm_applyallskins(character)
+    if not getgenv().gm_skins.enabled then return end
+    for _, tool in ipairs(character:GetChildren()) do
+        if tool:IsA("Tool") then
+            gm_applytoolskin(tool)
+            gm_applyknifeskin(tool)
+        end
+    end
+    for handlefoldername, _ in pairs(gm_handlemap) do
+        gm_applyhandleskin(character, handlefoldername)
+    end
+end
+
+local function gm_connectcharacter(character)
+    character.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            gm_applytoolskin(child)
+            gm_applyknifeskin(child)
+        elseif gm_handlemap[child.Name] then
+            task.defer(function() gm_applyhandleskin(character, child.Name) end)
+        end
+    end)
+    gm_applyallskins(character)
+end
+
+gm_localplayer.CharacterAdded:Connect(function(char)
+    gm_connectcharacter(char)
+end)
+
+if gm_localplayer.Character then
+    gm_connectcharacter(gm_localplayer.Character)
+end
+
+
+-- ============================================================
+-- ANGEL WINGS (save after death, velocity-based flap)
+-- ============================================================
+local gm_wings_enabled = false
+local gm_wings_connection = nil
+local gm_wings_cfg = {
+    speed = 0.8,       -- animation speed multiplier
+    flapAngle = 10,    -- max flap angle in degrees
+    twistAngle = 3,    -- max twist angle in degrees
+    velocityEffect = true, -- speed up flap when moving
+}
+
+local function gm_applywings(char)
+    if not gm_wings_enabled then return end
+    pcall(function()
+        local rs2 = game:GetService("ReplicatedStorage")
+        local run2 = game:GetService("RunService")
+        local torso = char:WaitForChild("UpperTorso", 5)
+        local hrp = char:WaitForChild("HumanoidRootPart", 5)
+        if not torso or not hrp then return end
+
+        local existing = char:FindFirstChild("Angel Wings")
+        if existing then existing:Destroy() end
+
+        local equipable = rs2:WaitForChild("EquipableItem", 5)
+        if not equipable then return end
+        local wingModel = equipable:WaitForChild("Angel Wings", 5)
+        if not wingModel then return end
+
+        local wing = wingModel:Clone()
+        wing.Parent = char
+
+        local handle = wing:WaitForChild("Handle", 5)
+        if not handle then wing:Destroy() return end
+        handle.Anchored = false
+        handle.CanCollide = false
+
+        local m = Instance.new("Motor6D")
+        m.Part0 = torso
+        m.Part1 = handle
+        m.C0 = CFrame.new(0, 0, 0)
+        m.Parent = torso
+
+        local t = 0
+        if gm_wings_connection then gm_wings_connection:Disconnect() end
+        gm_wings_connection = run2.RenderStepped:Connect(function(dt)
+            if not gm_wings_enabled or not char.Parent then
+                gm_wings_connection:Disconnect()
+                return
+            end
+            t += dt * gm_wings_cfg.speed
+            local speedMult = gm_wings_cfg.velocityEffect and math.clamp(hrp.Velocity.Magnitude / 10, 0, 1) or 0
+            local flap = math.sin(t * 1.5) * math.rad(gm_wings_cfg.flapAngle) * (0.5 + speedMult)
+            local twist = math.sin(t * 1.8) * math.rad(gm_wings_cfg.twistAngle)
+            m.C0 = CFrame.new(0, 0, 0) * CFrame.Angles(flap, 0, twist)
+        end)
+    end)
+end
+
+local function gm_removewings(char)
+    if char then
+        local existing = char:FindFirstChild("Angel Wings")
+        if existing then existing:Destroy() end
+    end
+    if gm_wings_connection then
+        gm_wings_connection:Disconnect()
+        gm_wings_connection = nil
+    end
+end
+
+gm_localplayer.CharacterAdded:Connect(function(char)
+    gm_applywings(char)
+end)
 
 -- /gm UI LIBRARY + INTERFACE
 -- ============================================================
@@ -4521,16 +4761,21 @@ local FoVSubPage = VisualPage:SubPage({Name = "FoV"})
 local VisualESPSubPage = VisualPage:SubPage({Name = "ESP"})
 local VisualBarsSubPage = VisualPage:SubPage({Name = "Bars"})
 local VisualTextSubPage = VisualPage:SubPage({Name = "Text"})
+local WingsSubPage = VisualPage:SubPage({Name = "Wings"})
 
 -- ============================================================
 -- COMBAT > SILENT AIM
 -- ============================================================
+-- COMBAT > SILENT AIM  (2 sections max per subpage)
+-- ============================================================
 do
+    -- Left: core settings
     local SASection = CombatSilentSubPage:Section({Name = "Silent Aim", Icon = "136879043989014", Side = 1})
     SASection:Toggle({Name = "Enable Silent Aim", Flag = "SAEnable", Default = true, Callback = function(v) gm_cfg.Silent.Enabled = v end})
     SASection:Toggle({Name = "Blatant Mode", Flag = "SABlatant", Default = true, Callback = function(v) gm_cfg.Silent.BlatantMode = v end})
     SASection:Toggle({Name = "Legit Mode", Flag = "SALegit", Default = false, Callback = function(v) gm_cfg.Silent.LegitMode = v end})
     SASection:Slider({Name = "Prediction", Flag = "SAPred", Min = 0, Max = 0.5, Default = 0.133, Suffix = "", Decimals = 0.001, Callback = function(v) gm_cfg.Silent.Prediction = v end})
+    SASection:Textbox({Flag = "SAPredText", Placeholder = "e.g. 0.133", Default = "0.133", Finished = true, Numeric = true, Callback = function(v) local n = tonumber(v) if n then gm_cfg.Silent.Prediction = n end end})
     SASection:Slider({Name = "Hit Chance %", Flag = "SAHitChance", Min = 0, Max = 100, Default = 79, Suffix = "%", Decimals = 1, Callback = function(v) gm_cfg.Silent.HitChance = v end})
     SASection:Slider({Name = "Air Hit Chance %", Flag = "SAAirHit", Min = 0, Max = 100, Default = 79, Suffix = "%", Decimals = 1, Callback = function(v) gm_cfg.Silent.AirHitChance = v end})
     SASection:Toggle({Name = "Predict Movement", Flag = "SAPredMove", Default = true, Callback = function(v) gm_cfg.Silent.PredictMovement = v end})
@@ -4538,6 +4783,7 @@ do
     SASection:Toggle({Name = "Humanize", Flag = "SAHumanize", Default = false, Callback = function(v) gm_cfg.Silent.Humanize = v end})
     SASection:Slider({Name = "Humanize Value", Flag = "SAHumanizeVal", Min = 1, Max = 20, Default = 5, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.Silent.HumanizeValue = v end})
 
+    -- Right: target settings
     local SATargetSection = CombatSilentSubPage:Section({Name = "Target", Icon = "136879043989014", Side = 2})
     SATargetSection:Dropdown({Name = "Target Part", Flag = "SATargetPart", Items = {"HumanoidRootPart", "Head", "UpperTorso", "LowerTorso"}, Default = "HumanoidRootPart", Multi = false, Callback = function(v) gm_cfg.Silent.Part = v end})
     SATargetSection:Toggle({Name = "Closest Part", Flag = "SAClosestPart", Default = true, Callback = function(v) gm_cfg.Silent.ClosestPart = v end})
@@ -4545,61 +4791,54 @@ do
     SATargetSection:Toggle({Name = "Use Air Part", Flag = "SAUseAirPart", Default = false, Callback = function(v) gm_cfg.Silent.UseAirPart = v end})
     SATargetSection:Dropdown({Name = "Air Part", Flag = "SAAirPart", Items = {"LowerTorso", "Head", "UpperTorso", "HumanoidRootPart"}, Default = "LowerTorso", Multi = false, Callback = function(v) gm_cfg.Silent.AirPart = v end})
     SATargetSection:Toggle({Name = "Anti Aim Viewer", Flag = "SAAntiAimViewer", Default = true, Callback = function(v) gm_cfg.Silent.AntiAimViewer = v end})
-
-    local SAFovSection = CombatSilentSubPage:Section({Name = "FoV", Icon = "136879043989014", Side = 1})
-    SAFovSection:Toggle({Name = "Show FoV", Flag = "SAFovVisible", Default = false, Callback = function(v) gm_cfg.Silent.Fov.Visible = v end})
-    SAFovSection:Slider({Name = "FoV Radius", Flag = "SAFovRadius", Min = 1, Max = 500, Default = 11.8, Suffix = "", Decimals = 0.1, Callback = function(v) gm_cfg.Silent.Fov.Radius = v SilentFovRadius.Value = v end})
-    SAFovSection:Toggle({Name = "Filled", Flag = "SAFovFilled", Default = true, Callback = function(v) gm_cfg.Silent.Fov.Filled = v end})
-    SAFovSection:Slider({Name = "Transparency", Flag = "SAFovTransp", Min = 0, Max = 1, Default = 0.1, Suffix = "", Decimals = 0.05, Callback = function(v) gm_cfg.Silent.Fov.Transparency = v end})
-    SAFovSection:Label("FoV Color"):Colorpicker({Flag = "SAFovColor", Default = Color3.fromRGB(200, 200, 200), Callback = function(v) gm_cfg.Silent.Fov.Color = v end})
-
-    local SAForceLockSection = CombatSilentSubPage:Section({Name = "Force Lock", Icon = "136879043989014", Side = 2})
-    SAForceLockSection:Toggle({Name = "Force Lock", Flag = "SAForceLock", Default = true, Callback = function(v) gm_cfg.Silent.ForceLock = v end})
-    SAForceLockSection:Toggle({Name = "Use Aim Assist Target", Flag = "SAForceLockAA", Default = true, Callback = function(v) gm_cfg.Silent.ForceLock_AimAssistTarget = v end})
-    SAForceLockSection:Toggle({Name = "Ping Prediction", Flag = "SAPingPred", Default = true, Callback = function(v) gm_cfg.Silent.PingPrediction.Enabled = v end})
-
-    local SATriggerSection = CombatSilentSubPage:Section({Name = "TriggerBot", Icon = "136879043989014", Side = 1})
-    SATriggerSection:Toggle({Name = "Enable TriggerBot", Flag = "SATrigger", Default = false, Callback = function(v) gm_cfg.Silent.TriggerBot = v end})
-    SATriggerSection:Toggle({Name = "Hold Mode", Flag = "SATriggerHold", Default = false, Callback = function(v) gm_cfg.Silent.TriggerBot_HoldMode = v end})
-    SATriggerSection:Slider({Name = "Delay (ms)", Flag = "SATriggerDelay", Min = 0, Max = 500, Default = 100, Suffix = "ms", Decimals = 1, Callback = function(v) gm_cfg.Silent.TriggerBot_Delay = v end})
+    SATargetSection:Toggle({Name = "Force Lock", Flag = "SAForceLock", Default = true, Callback = function(v) gm_cfg.Silent.ForceLock = v end})
+    SATargetSection:Toggle({Name = "Use AA Target", Flag = "SAForceLockAA", Default = true, Callback = function(v) gm_cfg.Silent.ForceLock_AimAssistTarget = v end})
+    SATargetSection:Toggle({Name = "Ping Prediction", Flag = "SAPingPred", Default = true, Callback = function(v) gm_cfg.Silent.PingPrediction.Enabled = v end})
+    SATargetSection:Toggle({Name = "TriggerBot", Flag = "SATrigger", Default = false, Callback = function(v) gm_cfg.Silent.TriggerBot = v end})
+    SATargetSection:Toggle({Name = "TB Hold Mode", Flag = "SATriggerHold", Default = false, Callback = function(v) gm_cfg.Silent.TriggerBot_HoldMode = v end})
+    SATargetSection:Slider({Name = "TB Delay (ms)", Flag = "SATriggerDelay", Min = 0, Max = 500, Default = 100, Suffix = "ms", Decimals = 1, Callback = function(v) gm_cfg.Silent.TriggerBot_Delay = v end})
 end
 
+-- SILENT AIM FoV — on the FoV visual subpage to keep combat clean
+-- (wired below with Visual FoV section)
+
 -- ============================================================
--- COMBAT > AIM ASSIST
+-- COMBAT > AIM ASSIST  (2 sections max per subpage)
 -- ============================================================
 do
+    -- Left: core + smoothness
     local AASection = AimAssistSubPage:Section({Name = "Aim Assist", Icon = "136879043989014", Side = 1})
     AASection:Toggle({Name = "Enable Aim Assist", Flag = "AAEnable", Default = true, Callback = function(v) gm_cfg.AimAssist.Enabled = v end})
     AASection:Dropdown({Name = "Method", Flag = "AAMethod", Items = {"Camera", "Mouse"}, Default = "Camera", Multi = false, Callback = function(v) gm_cfg.AimAssist.Method = v end})
     AASection:Dropdown({Name = "Target Part", Flag = "AATargetPart", Items = {"UpperTorso", "Head", "HumanoidRootPart", "LowerTorso"}, Default = "UpperTorso", Multi = false, Callback = function(v) gm_cfg.AimAssist.Part = v end})
     AASection:Toggle({Name = "Predict Movement", Flag = "AAPredMove", Default = true, Callback = function(v) gm_cfg.AimAssist.PredictMovement = v end})
     AASection:Slider({Name = "Prediction", Flag = "AAPred", Min = 0, Max = 0.5, Default = 0.1, Suffix = "", Decimals = 0.001, Callback = function(v) gm_cfg.AimAssist.Prediction = v end})
+    AASection:Textbox({Flag = "AAPredText", Placeholder = "e.g. 0.1", Default = "0.1", Finished = true, Numeric = true, Callback = function(v) local n = tonumber(v) if n then gm_cfg.AimAssist.Prediction = n end end})
     AASection:Toggle({Name = "First Person", Flag = "AAFirstPerson", Default = true, Callback = function(v) gm_cfg.AimAssist.FirstPerson = v end})
     AASection:Toggle({Name = "Third Person", Flag = "AAThirdPerson", Default = true, Callback = function(v) gm_cfg.AimAssist.ThirdPerson = v end})
     AASection:Toggle({Name = "Use Circle Radius", Flag = "AACircleRadius", Default = true, Callback = function(v) gm_cfg.AimAssist.UseCircleRadius = v end})
     AASection:Toggle({Name = "Closest Part", Flag = "AAClosestPart", Default = false, Callback = function(v) gm_cfg.AimAssist.ClosestPart = v end})
 
+    -- Right: smoothness + FoV + shake all together
     local AASmoothSection = AimAssistSubPage:Section({Name = "Smoothness", Icon = "136879043989014", Side = 2})
     AASmoothSection:Toggle({Name = "Use Smoothness", Flag = "AASmoothEnable", Default = true, Callback = function(v) gm_cfg.AimAssist.UseSmoothness = v end})
     AASmoothSection:Slider({Name = "Smooth X", Flag = "AASmoothX", Min = 0.001, Max = 1, Default = 0.058, Suffix = "", Decimals = 0.001, Callback = function(v) gm_cfg.AimAssist.Smoothness_X = v Script.SavedValue.AimAssistSmoothX = v end})
+    AASmoothSection:Textbox({Flag = "AASmoothXText", Placeholder = "e.g. 0.058", Default = "0.058", Finished = true, Numeric = true, Callback = function(v) local n = tonumber(v) if n then gm_cfg.AimAssist.Smoothness_X = n Script.SavedValue.AimAssistSmoothX = n end end})
     AASmoothSection:Slider({Name = "Smooth Y", Flag = "AASmoothY", Min = 0.001, Max = 1, Default = 0.044, Suffix = "", Decimals = 0.001, Callback = function(v) gm_cfg.AimAssist.Smoothness_Y = v Script.SavedValue.AimAssistSmoothY = v end})
+    AASmoothSection:Textbox({Flag = "AASmoothYText", Placeholder = "e.g. 0.044", Default = "0.044", Finished = true, Numeric = true, Callback = function(v) local n = tonumber(v) if n then gm_cfg.AimAssist.Smoothness_Y = n Script.SavedValue.AimAssistSmoothY = n end end})
     AASmoothSection:Toggle({Name = "Air Smoothness", Flag = "AAAirSmooth", Default = false, Callback = function(v) gm_cfg.AimAssist.AirSmoothness = v end})
     AASmoothSection:Slider({Name = "Air Smooth X", Flag = "AAAirSmoothX", Min = 0.001, Max = 1, Default = 0.01, Suffix = "", Decimals = 0.001, Callback = function(v) gm_cfg.AimAssist.AirSmoothness_X = v end})
+    AASmoothSection:Textbox({Flag = "AAAirSmoothXText", Placeholder = "e.g. 0.01", Default = "0.01", Finished = true, Numeric = true, Callback = function(v) local n = tonumber(v) if n then gm_cfg.AimAssist.AirSmoothness_X = n end end})
     AASmoothSection:Slider({Name = "Air Smooth Y", Flag = "AAAirSmoothY", Min = 0.001, Max = 1, Default = 0.0088, Suffix = "", Decimals = 0.001, Callback = function(v) gm_cfg.AimAssist.AirSmoothness_Y = v end})
-
-    local AAFovSection = AimAssistSubPage:Section({Name = "FoV", Icon = "136879043989014", Side = 1})
-    AAFovSection:Toggle({Name = "Show FoV", Flag = "AAFovVis", Default = false, Callback = function(v) gm_cfg.AimAssist.Fov.Visible = v end})
-    AAFovSection:Slider({Name = "FoV Radius", Flag = "AAFovRadius", Min = 10, Max = 500, Default = 70, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Fov.Radius = v end})
-    AAFovSection:Toggle({Name = "Filled", Flag = "AAFovFilled", Default = false, Callback = function(v) gm_cfg.AimAssist.Fov.Filled = v end})
-    AAFovSection:Slider({Name = "Transparency", Flag = "AAFovTransp", Min = 0, Max = 1, Default = 0.5, Suffix = "", Decimals = 0.1, Callback = function(v) gm_cfg.AimAssist.Fov.Transparency = v end})
-    AAFovSection:Label("FoV Color"):Colorpicker({Flag = "AAFovColor", Default = Color3.fromRGB(0, 0, 0), Callback = function(v) gm_cfg.AimAssist.Fov.Color = v end})
-
-    local AAShakeSection = AimAssistSubPage:Section({Name = "Shake", Icon = "136879043989014", Side = 2})
-    AAShakeSection:Toggle({Name = "Enable Shake", Flag = "AAShakeEnable", Default = false, Callback = function(v) gm_cfg.AimAssist.Shake.Enabled = v end})
-    AAShakeSection:Slider({Name = "Shake X", Flag = "AAShakeX", Min = 0, Max = 100, Default = 20, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Shake.Shake_X = v Script.SavedValue.ShakeX = v end})
-    AAShakeSection:Slider({Name = "Shake Y", Flag = "AAShakeY", Min = 0, Max = 100, Default = 15, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Shake.Shake_Y = v Script.SavedValue.ShakeY = v end})
-    AAShakeSection:Slider({Name = "Shake Z", Flag = "AAShakeZ", Min = 0, Max = 100, Default = 20, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Shake.Shake_Z = v Script.SavedValue.ShakeZ = v end})
-    AAShakeSection:Toggle({Name = "Air Shake", Flag = "AAAirShake", Default = true, Callback = function(v) gm_cfg.AimAssist.Shake.AirShake = v end})
+    AASmoothSection:Textbox({Flag = "AAAirSmoothYText", Placeholder = "e.g. 0.0088", Default = "0.0088", Finished = true, Numeric = true, Callback = function(v) local n = tonumber(v) if n then gm_cfg.AimAssist.AirSmoothness_Y = n end end})
+    AASmoothSection:Toggle({Name = "Show FoV", Flag = "AAFovVis", Default = false, Callback = function(v) gm_cfg.AimAssist.Fov.Visible = v end})
+    AASmoothSection:Slider({Name = "FoV Radius", Flag = "AAFovRadius", Min = 10, Max = 500, Default = 70, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Fov.Radius = v end})
+    AASmoothSection:Label("FoV Color"):Colorpicker({Flag = "AAFovColor", Default = Color3.fromRGB(0, 0, 0), Callback = function(v) gm_cfg.AimAssist.Fov.Color = v end})
+    AASmoothSection:Toggle({Name = "Enable Shake", Flag = "AAShakeEnable", Default = false, Callback = function(v) gm_cfg.AimAssist.Shake.Enabled = v end})
+    AASmoothSection:Slider({Name = "Shake X", Flag = "AAShakeX", Min = 0, Max = 100, Default = 20, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Shake.Shake_X = v Script.SavedValue.ShakeX = v end})
+    AASmoothSection:Slider({Name = "Shake Y", Flag = "AAShakeY", Min = 0, Max = 100, Default = 15, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Shake.Shake_Y = v Script.SavedValue.ShakeY = v end})
+    AASmoothSection:Slider({Name = "Shake Z", Flag = "AAShakeZ", Min = 0, Max = 100, Default = 20, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.AimAssist.Shake.Shake_Z = v Script.SavedValue.ShakeZ = v end})
+    AASmoothSection:Toggle({Name = "Air Shake", Flag = "AAAirShake", Default = true, Callback = function(v) gm_cfg.AimAssist.Shake.AirShake = v end})
 end
 
 -- ============================================================
@@ -4645,6 +4884,32 @@ do
     ESPColorsSection:Toggle({Name = "Flags", Flag = "ESPFlags", Default = false, Callback = function(v) gm_cfg.Esp.Flags.Enabled = v end})
     ESPColorsSection:Toggle({Name = "Walking State", Flag = "ESPWalkState", Default = false, Callback = function(v) gm_cfg.Esp.Flags.WalkingState = v end})
     ESPColorsSection:Toggle({Name = "Desync State", Flag = "ESPDesyncState", Default = false, Callback = function(v) gm_cfg.Esp.Flags.DesyncState = v end})
+
+    -- Wings SubPage
+    do
+        local WingsSection = WingsSubPage:Section({Name = "Angel Wings", Icon = "136879043989014", Side = 1})
+        WingsSection:Toggle({Name = "Enable Angel Wings", Flag = "WingsEnable", Default = false, Callback = function(v)
+            gm_wings_enabled = v
+            local char = gm_localplayer.Character
+            if v then
+                gm_applywings(char)
+            else
+                gm_removewings(char)
+            end
+        end})
+        WingsSection:Slider({Name = "Animation Speed", Flag = "WingsSpeed", Min = 0.1, Max = 5, Default = 0.8, Suffix = "x", Decimals = 0.1, Callback = function(v)
+            gm_wings_cfg.speed = v
+        end})
+        WingsSection:Slider({Name = "Flap Angle", Flag = "WingsFlapAngle", Min = 1, Max = 45, Default = 10, Suffix = "°", Decimals = 1, Callback = function(v)
+            gm_wings_cfg.flapAngle = v
+        end})
+        WingsSection:Slider({Name = "Twist Angle", Flag = "WingsTwistAngle", Min = 0, Max = 20, Default = 3, Suffix = "°", Decimals = 1, Callback = function(v)
+            gm_wings_cfg.twistAngle = v
+        end})
+        WingsSection:Toggle({Name = "Velocity Effect", Flag = "WingsVelocity", Default = true, Callback = function(v)
+            gm_wings_cfg.velocityEffect = v
+        end})
+    end
 
     local FoVSection = FoVSubPage:Section({Name = "FoV Circle", Icon = "136879043989014", Side = 1})
     FoVSection:Toggle({Name = "Show Silent FoV", Flag = "FoVSilentVis", Default = false, Callback = function(v) gm_cfg.Silent.Fov.Visible = v end})
@@ -4709,6 +4974,36 @@ do
     MacroSection:Toggle({Name = "Enable Speed Macro", Flag = "SpeedMacroEnable", Default = false, Callback = function(v) gm_cfg.Macro.Speed_Enabled = v end})
     MacroSection:Dropdown({Name = "Method", Flag = "SpeedMacroMethod", Items = {"FirstPerson", "ThirdPerson", "Shift"}, Default = "FirstPerson", Multi = false, Callback = function(v) gm_cfg.Macro.Speed_Method = v end})
     MacroSection:Slider({Name = "Delay", Flag = "SpeedMacroDelay", Min = 1, Max = 20, Default = 1, Suffix = "", Decimals = 1, Callback = function(v) gm_cfg.Macro.Speed_Delay = v end})
+
+    -- Skins SubPage
+    local SkinsSection = ZeroDelaySubPage:Section({Name = "Skins", Icon = "136879043989014", Side = 1})
+    SkinsSection:Toggle({Name = "Enable Skins", Flag = "SkinsEnable", Default = true, Callback = function(v)
+        getgenv().gm_skins.enabled = v
+    end})
+    SkinsSection:Dropdown({Name = "Double Barrel", Flag = "SkinDB", Items = {"None","Ascension","Shadow","Neon","Retro","Obsidian","Crimson","Arctic","Inferno","Galaxy","Void","Prism"}, Default = "Ascension", Multi = false, Callback = function(v)
+        getgenv().gm_skins["DoubleBarrel"] = (v == "None" and "" or v)
+    end})
+    SkinsSection:Dropdown({Name = "Revolver", Flag = "SkinRev", Items = {"None","Ascension","Shadow","Neon","Retro","Obsidian","Crimson","Arctic","Inferno","Galaxy","Void","Prism"}, Default = "Ascension", Multi = false, Callback = function(v)
+        getgenv().gm_skins["Revolver"] = (v == "None" and "" or v)
+    end})
+    SkinsSection:Dropdown({Name = "Tactical SG", Flag = "SkinTSG", Items = {"None","Ascension","Shadow","Neon","Retro","Obsidian","Crimson","Arctic","Inferno","Galaxy","Void","Prism"}, Default = "Ascension", Multi = false, Callback = function(v)
+        getgenv().gm_skins["TacticalShotgun"] = (v == "None" and "" or v)
+    end})
+    SkinsSection:Dropdown({Name = "Shotgun", Flag = "SkinSG", Items = {"None","Ascension","Shadow","Neon","Retro","Obsidian","Crimson","Arctic","Inferno","Galaxy","Void","Prism"}, Default = "Ascension", Multi = false, Callback = function(v)
+        getgenv().gm_skins["Shotgun"] = (v == "None" and "" or v)
+    end})
+    SkinsSection:Dropdown({Name = "SMG", Flag = "SkinSMG", Items = {"None","Ascension","Shadow","Neon","Retro","Obsidian","Crimson","Arctic","Inferno","Galaxy","Void","Prism"}, Default = "Ascension", Multi = false, Callback = function(v)
+        getgenv().gm_skins["SMG"] = (v == "None" and "" or v)
+    end})
+
+    local KnifeSection = ZeroDelaySubPage:Section({Name = "Knife Skin", Icon = "136879043989014", Side = 2})
+    KnifeSection:Dropdown({Name = "Knife", Flag = "SkinKnife", Items = {"None","Beta","Golden Age Tanto","Heaven","Love Kukri","Purple Dagger","Blue Dagger","Green Dagger","Red Dagger","Portal","Emerald Butterfly","Dragon","Void"}, Default = "Beta", Multi = false, Callback = function(v)
+        getgenv().gm_skins.special["Knife"] = (v == "None" and "" or v)
+    end})
+    KnifeSection:Button({Name = "Reapply Skins", Callback = function()
+        local char = gm_localplayer.Character
+        if char then gm_applyallskins(char) end
+    end})
 
     local ModSection = ZeroDelaySubPage:Section({Name = "Mod Detection", Icon = "136879043989014", Side = 1})
     ModSection:Toggle({Name = "Enable Mod Detection", Flag = "ModDetectEnable", Default = false, Callback = function(v) gm_cfg.ModDetection.Enabled = v end})
